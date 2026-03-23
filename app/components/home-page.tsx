@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { BeautifyDialog } from "./beautify-dialog";
 import { QrStylingCanvas } from "./qr-styling-canvas";
+import type { TypeNumber } from "qr-code-styling";
 import {
   buildQrCodeStylingOptions,
   defaultQrEditorModel,
@@ -54,6 +55,24 @@ export function HomePage() {
       roleClass: "text-on-surface-variant",
       img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCs-BhfqIrqI47H_C4D9P0lIl3EVaTcdTryrg6RHiWt3R4G5jozpFwlWgkABACqT9t2pPV19GnBaZDWYRplNkqmV6S_rfE_VkQqa45SQZxDwMT0d2Qqq2mOZr4bNj-5szDD56L0TSk4V1TDXz-YeLuW-RGbr1DnONFrGgyKoQEJqNkPC4VpaKRqAaAaq4F6NZRqTUBMtDW9syTMJRdwpLAK7CVDqzpl1fLoVa_7VUyIE6tGf0UNVzikF2UhQ47CMUDHMl9az_riZcU",
     },
+    {
+      quote:
+        "\"We tested QR Curator across three campaigns, and scans improved on every print size without re-tuning settings.\"",
+      name: "Ava Rodriguez",
+      role: "Marketing Ops, Beacon Studio",
+      card: "bg-surface-container-high text-on-surface",
+      roleClass: "text-on-surface-variant",
+      img: "https://randomuser.me/api/portraits/women/20.jpg",
+    },
+    {
+      quote:
+        "\"The templates look premium, and stakeholders stopped asking for 'just one more tweak'.\"",
+      name: "Liam Walker",
+      role: "Brand Manager, Northwind",
+      card: "bg-primary text-on-primary shadow-xl shadow-primary/10",
+      roleClass: "text-on-primary/70",
+      img: "https://randomuser.me/api/portraits/men/10.jpg",
+    },
   ];
   const bottomTestimonials = [
     {
@@ -92,6 +111,24 @@ export function HomePage() {
       roleClass: "text-on-surface-variant",
       img: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&q=80&auto=format&fit=crop",
     },
+    {
+      quote:
+        "\"From URL to QR artwork, the workflow is quick and reliable—no fiddly controls.\"",
+      name: "Sophia Martin",
+      role: "Design Engineer, Paperwave",
+      card: "bg-surface-container-high text-on-surface",
+      roleClass: "text-on-surface-variant",
+      img: "https://randomuser.me/api/portraits/women/40.jpg",
+    },
+    {
+      quote:
+        "\"Color and logo options finally match our brand guidelines without compromise.\"",
+      name: "Ethan Brooks",
+      role: "Creative Lead, Prismworks",
+      card: "bg-primary text-on-primary shadow-xl shadow-primary/10",
+      roleClass: "text-on-primary/70",
+      img: "https://randomuser.me/api/portraits/men/30.jpg",
+    },
   ];
 
   const heroOptions = useMemo(
@@ -115,16 +152,37 @@ export function HomePage() {
   const downloadHero = async () => {
     const { default: QRCodeStyling } = await import("qr-code-styling");
     const w = Math.round(HERO_QR_PX * 3);
-    const qr = new QRCodeStyling({
-      ...buildQrCodeStylingOptions({
-        ...styleModel,
-        data: qrContent,
-        width: w,
-        height: w,
-      }),
-      type: "svg",
+    const baseOpts = buildQrCodeStylingOptions({
+      ...styleModel,
+      data: qrContent,
+      width: w,
+      height: w,
     });
-    await qr.download({ name: "qr-curator", extension: downloadFormat });
+
+    try {
+      const qr = new QRCodeStyling({
+        ...baseOpts,
+        type: "svg",
+      });
+      await qr.download({ name: "qr-curator", extension: downloadFormat });
+    } catch {
+      // Fallback to Auto version to avoid "code length overflow".
+      const fallbackOpts = {
+        ...baseOpts,
+        qrOptions: {
+          ...(baseOpts.qrOptions as NonNullable<typeof baseOpts.qrOptions>),
+          typeNumber: 0 as TypeNumber,
+        },
+      };
+      try {
+        const qr = new QRCodeStyling({ ...fallbackOpts, type: "svg" });
+        await qr.download({ name: "qr-curator", extension: downloadFormat });
+      } catch (e) {
+        alert("二维码内容过长，当前版本无法编码。请切回 Auto 或选择更高版本/更低容错后再下载。");
+        // eslint-disable-next-line no-console
+        console.error(e);
+      }
+    }
   };
 
   return (

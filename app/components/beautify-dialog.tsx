@@ -60,6 +60,57 @@ const STYLE_LABELS: Record<StyleTemplateId, string> = {
 const selectClass =
   "w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
 
+function RulerSlider({
+  label,
+  min,
+  max,
+  step,
+  value,
+  disabled,
+  onChange,
+  formatValue,
+  minHint,
+  maxHint,
+}: {
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  disabled?: boolean;
+  onChange: (v: number) => void;
+  formatValue: (v: number) => string;
+  minHint?: string;
+  maxHint?: string;
+}) {
+  const pct = max === min ? 100 : ((value - min) / (max - min)) * 100;
+  return (
+    <div className="space-y-1">
+      <label className="mb-1 block text-xs font-medium text-on-surface-variant">{label}</label>
+      <input
+        type="range"
+        className="qr-ruler-slider w-full disabled:cursor-not-allowed disabled:opacity-50"
+        style={{ ["--pct" as string]: `${pct}%` }}
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      {(minHint || maxHint) && (
+        <div className="flex justify-between text-[10px] text-on-surface-variant/80">
+          <span>{minHint}</span>
+          <span>{maxHint}</span>
+        </div>
+      )}
+      <p className="text-sm font-medium text-on-surface">
+        Current: <span className="text-primary">{formatValue(value)}</span>
+      </p>
+    </div>
+  );
+}
+
 type Props = {
   open: boolean;
   content: string;
@@ -92,6 +143,26 @@ export function BeautifyDialog({
   const labelPx = useMemo(() => {
     return LABEL_SIZE_OPTIONS.find((o) => o.id === labelSizeId)?.px ?? 360;
   }, [labelSizeId]);
+
+  const marginSliderValue = useMemo(() => {
+    const v = model.marginBlocks;
+    return MARGIN_BLOCK_OPTIONS.some((o) => o.value === v) ? v : 2;
+  }, [model.marginBlocks]);
+
+  const errorSliderIndex = useMemo(
+    () => Math.max(0, ERROR_LEVELS.findIndex((l) => l.level === model.errorCorrectionLevel)),
+    [model.errorCorrectionLevel],
+  );
+
+  const versionSliderIndex = useMemo(
+    () => Math.max(0, VERSION_OPTIONS.findIndex((v) => v.typeNumber === model.typeNumber)),
+    [model.typeNumber],
+  );
+
+  const labelSliderIndex = useMemo(
+    () => Math.max(0, LABEL_SIZE_OPTIONS.findIndex((o) => o.id === labelSizeId)),
+    [labelSizeId],
+  );
 
   useEffect(() => {
     if (open && !wasOpenRef.current) {
@@ -182,14 +253,35 @@ export function BeautifyDialog({
 
   const downloadPrint = async () => {
     const { default: QRCodeStyling } = await import("qr-code-styling");
-    const opts = buildQrCodeStylingOptions({
+    const baseOpts = buildQrCodeStylingOptions({
       ...model,
       data: content || model.data,
       width: Math.round(labelPx * 2.5),
       height: Math.round(labelPx * 2.5),
     });
-    const qr = new QRCodeStyling({ ...opts, type: "svg" });
-    await qr.download({ name: "qr-curator", extension: downloadFormat });
+
+    try {
+      const qr = new QRCodeStyling({ ...baseOpts, type: "svg" });
+      await qr.download({ name: "qr-curator", extension: downloadFormat });
+    } catch {
+      // Fallback: if payload is too long for current version/error-correction,
+      // switch QR Version to Auto (typeNumber: 0) and try again.
+      const fallbackOpts = {
+        ...baseOpts,
+        qrOptions: {
+          ...(baseOpts.qrOptions as NonNullable<typeof baseOpts.qrOptions>),
+          typeNumber: 0 as TypeNumber,
+        },
+      };
+      try {
+        const qr = new QRCodeStyling({ ...fallbackOpts, type: "svg" });
+        await qr.download({ name: "qr-curator", extension: downloadFormat });
+      } catch (e) {
+        alert("二维码内容过长，当前版本无法编码。请切回 Auto 或选择更高版本/更低容错后再下载。");
+        // eslint-disable-next-line no-console
+        console.error(e);
+      }
+    }
   };
 
   if (!open) return null;
@@ -294,29 +386,54 @@ export function BeautifyDialog({
               {model.customEyeColor && <input type="color" value={model.eyeColor} onChange={(e) => setModel((m) => ({ ...m, eyeColor: e.target.value }))} className="h-9 w-20 cursor-pointer" />}
             </section>
 
-            <section className="space-y-3">
+            <section className="space-y-4">
               <p className="text-sm font-semibold text-on-surface">More</p>
 
-              <div>
-                <label className="mb-1 block text-xs font-medium text-on-surface-variant">Margin</label>
-                <select className={selectClass} value={model.marginBlocks} onChange={(e) => setModel((m) => ({ ...m, marginBlocks: Number(e.target.value) }))}>
-                  {MARGIN_BLOCK_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </div>
+              <RulerSlider
+                label="Margin"
+                min={0}
+                max={4}
+                step={1}
+                value={marginSliderValue}
+                formatValue={(v) =>
+                  MARGIN_BLOCK_OPTIONS.find((o) => o.value === v)?.label ?? `${v} blocks`
+                }
+                minHint="0"
+                maxHint="4"
+                onChange={(v) => setModel((m) => ({ ...m, marginBlocks: v }))}
+              />
 
-              <div>
-                <label className="mb-1 block text-xs font-medium text-on-surface-variant">Error Tolerance</label>
-                <select className={selectClass} value={model.errorCorrectionLevel} onChange={(e) => setModel((m) => ({ ...m, errorCorrectionLevel: e.target.value as QrEditorModel["errorCorrectionLevel"] }))}>
-                  {ERROR_LEVELS.map((l) => <option key={l.level} value={l.level}>{l.label}</option>)}
-                </select>
-              </div>
+              <RulerSlider
+                label="Error Tolerance"
+                min={0}
+                max={ERROR_LEVELS.length - 1}
+                step={1}
+                value={errorSliderIndex}
+                formatValue={(idx) => ERROR_LEVELS[idx]?.label ?? ""}
+                minHint={ERROR_LEVELS[0]?.label}
+                maxHint={ERROR_LEVELS[ERROR_LEVELS.length - 1]?.label}
+                onChange={(idx) => {
+                  const level = ERROR_LEVELS[idx]?.level;
+                  if (!level) return;
+                  setModel((m) => ({ ...m, errorCorrectionLevel: level }));
+                }}
+              />
 
-              <div>
-                <label className="mb-1 block text-xs font-medium text-on-surface-variant">QR Version</label>
-                <select className={selectClass} value={model.typeNumber} onChange={(e) => setModel((m) => ({ ...m, typeNumber: Number(e.target.value) as TypeNumber }))}>
-                  {VERSION_OPTIONS.map((v) => <option key={v.typeNumber} value={v.typeNumber}>{v.label}</option>)}
-                </select>
-              </div>
+              <RulerSlider
+                label="QR Version"
+                min={0}
+                max={VERSION_OPTIONS.length - 1}
+                step={1}
+                value={versionSliderIndex}
+                formatValue={(idx) => VERSION_OPTIONS[idx]?.label ?? ""}
+                minHint={VERSION_OPTIONS[0]?.label}
+                maxHint={VERSION_OPTIONS[VERSION_OPTIONS.length - 1]?.label}
+                onChange={(idx) => {
+                  const tn = VERSION_OPTIONS[idx]?.typeNumber;
+                  if (tn === undefined) return;
+                  setModel((m) => ({ ...m, typeNumber: tn as TypeNumber }));
+                }}
+              />
 
               <div>
                 <label className="mb-1 block text-xs font-medium text-on-surface-variant">Encoded Content</label>
@@ -324,32 +441,66 @@ export function BeautifyDialog({
                 <p className="mt-1 text-[10px] text-on-surface-variant">You can edit content directly; save to sync with homepage preview.</p>
               </div>
 
-              <div>
-                <label className="mb-1 block text-xs font-medium text-on-surface-variant">Label Size</label>
-                <select className={selectClass} value={labelSizeId} onChange={(e) => setLabelSizeId(e.target.value)}>
-                  {LABEL_SIZE_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-                </select>
-              </div>
+              <RulerSlider
+                label="Label Size"
+                min={0}
+                max={LABEL_SIZE_OPTIONS.length - 1}
+                step={1}
+                value={labelSliderIndex}
+                formatValue={(idx) => LABEL_SIZE_OPTIONS[idx]?.label ?? ""}
+                minHint={LABEL_SIZE_OPTIONS[0]?.label}
+                maxHint={LABEL_SIZE_OPTIONS[LABEL_SIZE_OPTIONS.length - 1]?.label}
+                onChange={(idx) => {
+                  const id = LABEL_SIZE_OPTIONS[idx]?.id;
+                  if (!id) return;
+                  setLabelSizeId(id);
+                }}
+              />
 
               <div>
                 <label className="mb-1 block text-xs font-medium text-on-surface-variant">Download Format</label>
-                <select
-                  className={selectClass}
-                  value={downloadFormat}
-                  onChange={(e) =>
-                    onDownloadFormatChange(e.target.value as "png" | "jpeg")
-                  }
-                >
-                  <option value="png">PNG</option>
-                  <option value="jpeg">JPG</option>
-                </select>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {(
+                    [
+                      { id: "png" as const, label: "PNG" },
+                      { id: "jpeg" as const, label: "JPG" },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => onDownloadFormatChange(opt.id)}
+                      className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${
+                        downloadFormat === opt.id
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-outline-variant/40 bg-surface-container-lowest text-on-surface hover:bg-surface-container-high"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[10px] text-on-surface-variant">
+                  Current: <span className="font-medium text-primary">{downloadFormat === "jpeg" ? "JPG" : "PNG"}</span>
+                </p>
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium text-on-surface-variant">Center Logo Scale</label>
-                <input type="range" min={0.15} max={0.45} step={0.01} value={model.imageSize} disabled={!model.logoDataUrl} onChange={(e) => setModel((m) => ({ ...m, imageSize: Number(e.target.value) }))} className="w-full accent-primary disabled:cursor-not-allowed disabled:opacity-50" />
-                <p className="text-[10px] text-on-surface-variant">{Math.round(model.imageSize * 100)}%</p>
-                {!model.logoDataUrl && <p className="text-[10px] text-error">Upload or select a logo before adjusting scale.</p>}
+                <RulerSlider
+                  label="Center Logo Scale"
+                  min={0.15}
+                  max={0.45}
+                  step={0.01}
+                  value={model.imageSize}
+                  disabled={!model.logoDataUrl}
+                  formatValue={(v) => `${Math.round(v * 100)}%`}
+                  minHint="15%"
+                  maxHint="45%"
+                  onChange={(v) => setModel((m) => ({ ...m, imageSize: v }))}
+                />
+                {!model.logoDataUrl && (
+                  <p className="mt-1 text-[10px] text-error">Upload or select a logo before adjusting scale.</p>
+                )}
               </div>
             </section>
 
